@@ -9,6 +9,8 @@ import os
 
 import cv2
 import numpy as np
+from PIL import Image
+
 from action import ActionControl
 from classfier import Classifier
 from communication import Channel
@@ -16,8 +18,56 @@ from communication import Channel
 # 导入自定义模块
 from map2 import load_tag_pos
 from navigation import RobotNavigator
-from PIL import Image
 from regiondetector import RegionDetector
+
+
+def classify_and_communicate(
+    tagid_to_best, classifier, channel, flower_types, target, idx, prefix="nav"
+):
+    for tag_id, data in tagid_to_best.items():
+        regions = data["regions"]
+        if not regions or regions[0]["width"] == 0 or regions[0]["height"] == 0:
+            continue
+        region = regions[0]
+        region_img_path = f"{prefix}_region_{idx + 1}_tag{tag_id}.jpg"
+        x, y, w, h = region["x"], region["y"], region["width"], region["height"]
+        roi_img = data["result_img"][y : y + h, x : x + w]
+        cv2.imwrite(region_img_path, roi_img)
+        print(f"屏幕区域已提取并保存至: {region_img_path}")
+
+        # 分类阶段
+        print("\n=== 开始分类阶段 ===")
+        try:
+            from PIL import Image
+
+            screen_img = Image.open(region_img_path).resize((28, 28))
+        except Exception as e:
+            print(f"无法打开屏幕区域图像: {e}，跳过该区域")
+            continue
+
+        class_result = classifier.wrap_classify(screen_img)
+        if class_result is None:
+            print("分类失败，跳过该区域")
+            continue
+
+        print(f"分类结果: {class_result}")
+        if 0 <= class_result < len(flower_types):
+            flower_type = flower_types[class_result]
+            print(f"检测到的花朵类型: {flower_type}")
+        else:
+            print(f"未知分类结果: {class_result}，跳过该区域")
+            continue
+
+        # 通信阶段
+        print("\n=== 开始通信阶段 ===")
+        try:
+            score = channel.change_flower(tag_id, flower_type, target)
+            if score is not None:
+                print(f"成功改变花朵！分数: {score}")
+            else:
+                print("改变花朵失败")
+        except Exception as e:
+            print(f"通信过程出错: {e}，跳过该区域")
 
 
 def main():
@@ -42,7 +92,7 @@ def main():
     # 初始化动作控制器
     action_controller = ActionControl()
     # 初始化通信通道（只初始化一次）
-    channel = Channel("10.0.0.10", "team1", "password1")  # 使用正确的IP和凭据
+    channel = Channel("192.168.1.254", "team1", "password1")  # 使用正确的IP和凭据
     # 初始化团队，获取目标
     try:
         target = channel.initialize_team()
@@ -85,67 +135,19 @@ def main():
             f"screen_{idx + 1}_right.jpg",
         ]
         # 拍照顺序：正面、左、右
-        # 正面
         detector.capture_image(image_paths[0])
-        # 左
         action_controller.turn_head_left()
         detector.capture_image(image_paths[1])
         action_controller.turn_head_back()
-        # 右
         action_controller.turn_head_right()
         detector.capture_image(image_paths[2])
         action_controller.turn_head_back()
 
-        # 依次处理三张照片
-        for direction, image_path in zip(["正面", "左面", "右面"], image_paths):
-            print(f"\n=== 处理{direction}拍照 ===")
-            result_imgs, regions_list, tag_ids = detector.preprocess_image(image_path)
-            if not regions_list or all(len(regions) == 0 for regions in regions_list):
-                print(f"{direction}未检测到任何tag的有效区域，跳过该方向")
-                continue
-
-            for tag_idx, (regions, tag_id) in enumerate(zip(regions_list, tag_ids)):
-                if not regions or regions[0]["width"] == 0 or regions[0]["height"] == 0:
-                    continue
-                region = regions[0]
-                # 提取区域图像
-                region_img_path = f"screen_region_{idx + 1}_{direction}_tag{tag_id}.jpg"
-                x, y, w, h = region["x"], region["y"], region["width"], region["height"]
-                roi_img = result_imgs[tag_idx][y : y + h, x : x + w]
-                cv2.imwrite(region_img_path, roi_img)
-                print(f"屏幕区域已提取并保存至: {region_img_path}")
-
-                # 分类阶段
-                print("\n=== 开始分类阶段 ===")
-                try:
-                    screen_img = Image.open(region_img_path).resize((28, 28))
-                except Exception as e:
-                    print(f"无法打开屏幕区域图像: {e}，跳过该区域")
-                    continue
-
-                class_result = classifier.wrap_classify(screen_img)
-                if class_result is None:
-                    print("分类失败，跳过该区域")
-                    continue
-
-                print(f"分类结果: {class_result}")
-                if 0 <= class_result < len(flower_types):
-                    flower_type = flower_types[class_result]
-                    print(f"检测到的花朵类型: {flower_type}")
-                else:
-                    print(f"未知分类结果: {class_result}，跳过该区域")
-                    continue
-
-                # 通信阶段
-                print("\n=== 开始通信阶段 ===")
-                try:
-                    score = channel.change_flower(tag_id, flower_type, target)
-                    if score is not None:
-                        print(f"成功改变花朵！分数: {score}")
-                    else:
-                        print("改变花朵失败")
-                except Exception as e:
-                    print(f"通信过程出错: {e}，跳过该区域")
+        tagid_to_best = detector.process_multi_images(image_paths)
+        # 处理完所有图像后，进行分类和通信
+        classify_and_communicate(
+            tagid_to_best, classifier, channel, flower_types, target, idx
+        )
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ class RegionDetector:
         self.camera_index = 2
         self.camera_width = 1920
         self.camera_height = 1080
-        self.min_area = 1000  # 最小区域面积
+        self.min_area = 500  # 最小区域面积
         self.solidity_threshold = 0.8  # 凸度阈值
         self.aspect_ratio_range = (0.3, 0.8)  # 长宽比范围
         self.actioncontroller = ActionControl()
@@ -92,26 +92,30 @@ class RegionDetector:
             if tag_area < tag_min_area:
                 print(f"Tag {tag.tag_id} 面积过小，跳过")
                 continue
-
-            
+            print(f"Tag{tag_id}面积合适，开始处理")
             # 以tag中心为基准，取4倍tag长宽的区域
             center_x = int(np.mean(corners[:, 0]))
             center_y = int(np.mean(corners[:, 1]))
             roi_x = center_x
             roi_y = center_y
             roi_w = int(tag_w * 4)
-            roi_h = int(tag_h * 3)
+            roi_h = int(tag_h * 4)
             # 保证ROI不越界
             roi_x = max(0, roi_x)
             roi_y = max(0, roi_y)
             if roi_x - roi_w < 1:
+                print(f"Tag{tag_id}对应区域不在摄像头内")
                 continue
             if roi_y + roi_h > height:
+                print(f"Tag{tag_id}对应区域不在摄像头内")
                 continue
-            roi_img = img[roi_y : roi_y + roi_h, roi_x - roi_w : roi_x - int(tag_w)].copy()
+            roi_img = img[
+                roi_y : roi_y + roi_h, roi_x - roi_w : roi_x - int(tag_w)
+            ].copy()
             if roi_img.size == 0:
+                print(f"Tag{tag_id}对应区域不在摄像头内")
                 continue
-
+            
             # 对ROI区域执行原有的区域检测逻辑
             gray = cv2.cvtColor(roi_img, cv2.COLOR_BGR2GRAY)
             gray = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -132,15 +136,11 @@ class RegionDetector:
             result_img = roi_img.copy()
             detected_regions = []
             roi_height, roi_width = roi_img.shape[:2]
-            center_x_start = int(roi_width * 0.05)
-            center_x_end = int(roi_width * 0.95)
-            center_y_start = int(roi_height * 0.3)
-            center_y_end = int(roi_height * 0.7)
 
             for contour in contours:
                 area = cv2.contourArea(contour)
                 if area < self.min_area:
-                    print("区域面积过小，跳过")
+                    
                     continue
                 perimeter = cv2.arcLength(contour, True)
                 approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
@@ -151,13 +151,9 @@ class RegionDetector:
                         solidity = float(area) / hull_area
                         if solidity > self.solidity_threshold:
                             x, y, w, h = cv2.boundingRect(contour)
-                            center_x = x + w / 2
-                            center_y = y + h / 2
                             aspect_ratio = float(w) / h
                             if (
-                                center_x_start <= center_x <= center_x_end
-                                and center_y_start <= center_y <= center_y_end
-                                and self.aspect_ratio_range[0]
+                                self.aspect_ratio_range[0]
                                 < aspect_ratio
                                 < self.aspect_ratio_range[1]
                             ):
@@ -172,6 +168,7 @@ class RegionDetector:
                                 )
             # 选择面积最大的区域
             if detected_regions:
+                print(f"Tag{tag_id}找到了对应屏幕")
                 max_region = max(detected_regions, key=lambda x: x["area"])
                 # 在原图上画出矩形
                 cv2.rectangle(
@@ -185,6 +182,7 @@ class RegionDetector:
                     2,
                 )
             else:
+                print(f"{tag_id}cannot find a screen")
                 continue
 
             result_imgs.append(result_img)
@@ -257,3 +255,52 @@ class RegionDetector:
                 region["tag_id"] = tag_id
                 all_regions.append(region)
         return all_regions
+
+    def process_multi_images(self, image_paths, brightness_threshold=250):
+        """
+        处理多张图片，合并所有图片的tag检测结果，只保留每个tag_id亮度最低且低于阈值的那组。
+
+        参数:
+            image_paths: 图片路径列表
+            brightness_threshold: 亮度阈值，只有低于该值的区域才会被保留
+
+        返回:
+            tagid_to_best: dict, key为tag_id，value为{"result_img", "regions", "brightness"}
+        """
+        all_result_imgs = []
+        all_regions_list = []
+        all_tag_ids = []
+        all_brightness = []
+
+        for image_path in image_paths:
+            print(f"正在处理{image_path}")
+            result_imgs, regions_list, tag_ids = self.preprocess_image(image_path)
+            for tag_idx, (regions, tag_id) in enumerate(zip(regions_list, tag_ids)):
+                if not regions or regions[0]["width"] == 0 or regions[0]["height"] == 0:
+                    continue
+                region = regions[0]
+                x, y, w, h = region["x"], region["y"], region["width"], region["height"]
+                roi_img = result_imgs[tag_idx][y : y + h, x : x + w]
+                gray = cv2.cvtColor(roi_img, cv2.COLOR_BGR2GRAY)
+                brightness = float(np.mean(gray))
+                if brightness > brightness_threshold:
+                    print(f"{image_path} de {tag_id} too birght")
+                    continue  # 跳过亮度过高的区域
+                all_result_imgs.append(result_imgs[tag_idx])
+                all_regions_list.append([region])
+                all_tag_ids.append(tag_id)
+                all_brightness.append(brightness)
+
+        tagid_to_best = {}
+        for i, tag_id in enumerate(all_tag_ids):
+            if (
+                tag_id not in tagid_to_best
+                or all_brightness[i] < tagid_to_best[tag_id]["brightness"]
+            ):
+                tagid_to_best[tag_id] = {
+                    "result_img": all_result_imgs[i],
+                    "regions": all_regions_list[i],
+                    "brightness": all_brightness[i],
+                }
+        print(f"将对总共{len(tagid_to_best)}个合理屏幕进行分类通信")
+        return tagid_to_best
