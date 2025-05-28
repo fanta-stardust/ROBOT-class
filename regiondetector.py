@@ -25,9 +25,9 @@ class RegionDetector:
         self.camera_index = 2
         self.camera_width = 1920
         self.camera_height = 1080
-        self.min_area = 500  # 最小区域面积
+        self.min_area = 1500  # 最小区域面积
         self.solidity_threshold = 0.8  # 凸度阈值
-        self.aspect_ratio_range = (0.3, 0.8)  # 长宽比范围
+        self.aspect_ratio_range = (0.35, 0.8)  # 长宽比范围
         self.actioncontroller = ActionControl()
 
     def capture_image(self, save_path: str) -> bool:
@@ -100,15 +100,16 @@ class RegionDetector:
             roi_y = center_y
             roi_w = int(tag_w * 4)
             roi_h = int(tag_h * 4)
+            if roi_x <0.05*1920 :
+                print(f"tag{tag_id}不在中心")
+                continue
             # 保证ROI不越界
             roi_x = max(0, roi_x)
             roi_y = max(0, roi_y)
             if roi_x - roi_w < 1:
-                print(f"Tag{tag_id}对应区域不在摄像头内")
-                continue
+                roi_w=roi_x-1
             if roi_y + roi_h > height:
-                print(f"Tag{tag_id}对应区域不在摄像头内")
-                continue
+                roi_h=height-roi_y-1
             roi_img = img[
                 roi_y : roi_y + roi_h, roi_x - roi_w : roi_x - int(tag_w)
             ].copy()
@@ -256,7 +257,8 @@ class RegionDetector:
                 all_regions.append(region)
         return all_regions
 
-    def process_multi_images(self, image_paths, brightness_threshold=250):
+    def process_multi_images(self, image_paths, brightness_threshold=210):
+        #196 198
         """
         处理多张图片，合并所有图片的tag检测结果，只保留每个tag_id亮度最低且低于阈值的那组。
 
@@ -282,10 +284,10 @@ class RegionDetector:
                 x, y, w, h = region["x"], region["y"], region["width"], region["height"]
                 roi_img = result_imgs[tag_idx][y : y + h, x : x + w]
                 gray = cv2.cvtColor(roi_img, cv2.COLOR_BGR2GRAY)
-                brightness = float(np.mean(gray))
-                if brightness > brightness_threshold:
-                    print(f"{image_path} de {tag_id} too birght")
-                    continue  # 跳过亮度过高的区域
+                brightness = np.median(gray)
+                #if brightness > brightness_threshold:
+                #    print(f"{image_path} de {tag_id} too birght")
+                #    continue  # 跳过亮度过高的区域
                 all_result_imgs.append(result_imgs[tag_idx])
                 all_regions_list.append([region])
                 all_tag_ids.append(tag_id)

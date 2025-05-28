@@ -19,9 +19,7 @@ def run_action(cmd):
     if cnt_err == 50:
         print('can not get REQ')
     else:
-        #print('read REQ finished!')
         ser.write(cmd2data(cmd))
-        #print('send action ok!')
     ser.close()
 
 def crc_calculate(package):
@@ -48,9 +46,8 @@ def wait_req():
     while 1:
         test_read=ser.read()
         if test_read== b'\xa3' :
-            #print('read REQ finished!') 
             break
-
+        
 
 class ActionControl:
     """
@@ -122,10 +119,12 @@ class ActionControl:
         self.logger.debug("command done")
 
     def turn_head_left(self):
-        self.run_str("HeadTurn140")
+        self.run_str("HeadTurn180")
+        #self.run_str("HeadTurn140")
 
     def turn_head_right(self):
-        self.run_str("HeadTurn060")
+        self.run_str("HeadTurn020")
+        #self.run_str("HeadTurn060")
 
     def turn_head_back(self):
         self.run_str("HeadTurnMM")
@@ -136,26 +135,33 @@ class ActionControl:
     def turn_to_direction(self, current_direction, target_direction):
         """转向到目标方向"""
         turn_direction, angle = self.calculate_turn(current_direction, target_direction)
-        if angle >= 20:
-            num = round(angle/20)
-            cmd = 'turn004R' if turn_direction == "顺时针" else 'turn004L'
-            for _ in range(num):
-                self.run_str(cmd)
+        if turn_direction == "顺时针":
+            num=round(angle/18)
+            cmd = "turn004R"
+        else:
+            num=round(angle/22.5)
+            cmd="turn004L"
+        for _ in range(num):
+            self.run_str(cmd)  
+                
 
     def go_straight(self, distance):
         """直线行走指定距离"""
-        if distance > 25:
+        if distance > 45:
             # 长距离使用快速前进
-            num = int(np.floor(distance / 25))
-            print(f"执行fastForward03 {num}次")
+            num = int(np.floor(distance / 45))
+            print(f"执行fastForward07 {num}次")
             for _ in range(num):
-                    self.run_str("fastForward03")
+                    self.run_str("fastForward07")
         else:
             # 短距离使用普通前进
-            num = int(np.floor(distance / 6))
-            print(f"执行Forwalk02 {num}次")
+            num = int(np.floor(distance / 23))
+            if num == 0 :
+                num+=1
+            print(f"执行fastForward04 {num}次")
             for _ in range(num):
-                self.run_str("Forwalk02")
+                self.run_str("fastForward04")
+            
     
     @staticmethod
     def calculate_turn(current_direction, target_direction):
