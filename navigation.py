@@ -482,19 +482,22 @@ class PathPlanner:
             ]
         )
 
-        # 为每个柱子添加四边形边界
+        # 为每个柱子添加扩展后的四边形边界
+        expand = 10  # 扩展10cm
         for pos in lr:
-            width = height = 25
+            width = height = 25 + expand  # 原25，扩展10
+            x0 = pos[0] - expand / 2
+            y0 = pos[1] - expand / 2
             # 添加四条边
             for i in range(int(width)):
                 ox.extend(
-                    [pos[0] + i, pos[0] + i, pos[0] + width - i, pos[0] + width - i]
+                    [x0 + i, x0 + i, x0 + width - i, x0 + width - i]
                 )
-                oy.extend([pos[1], pos[1] + height, pos[1], pos[1] + height])
+                oy.extend([y0, y0 + height, y0, y0 + height])
             for i in range(int(height)):
-                ox.extend([pos[0], pos[0] + width, pos[0], pos[0] + width])
+                ox.extend([x0, x0 + width, x0, x0 + width])
                 oy.extend(
-                    [pos[1] + i, pos[1] + i, pos[1] + height - i, pos[1] + height - i]
+                    [y0 + i, y0 + i, y0 + height - i, y0 + height - i]
                 )
 
         # 添加场地边界
@@ -611,8 +614,8 @@ class RobotNavigator:
                 )
                 <= 30
             ):
-                print("到达目标点")
-                break
+                print(f"到达目标点 位置{pos} 方向{direction}")
+                return pos,direction
 
             # 3. 检查是否需要重新规划
             if (
@@ -656,3 +659,4 @@ class RobotNavigator:
 
                 # 移除已完成的路径点
                 self.direction_changes.pop(0)
+         
